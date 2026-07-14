@@ -111,6 +111,42 @@
   #file-list .fempty {
     padding: 24px; text-align: center; color: #aaa; font-size: 0.85rem;
   }
+
+  /* ── 删除按钮 ── */
+  .del-btn {
+    background: none; border: none; cursor: pointer;
+    color: #ccc; font-size: 1rem; padding: 2px 6px; margin-left: 8px;
+    border-radius: 4px; transition: all .15s; line-height: 1;
+  }
+  .del-btn:hover { color: #e74c3c; background: #fef0ef; }
+
+  /* ── 密码弹窗 ── */
+  #modal-overlay {
+    display: none; position: fixed; z-index: 999;
+    inset: 0; background: rgba(0,0,0,.35);
+    align-items: center; justify-content: center;
+  }
+  #modal-overlay.show { display: flex; }
+  #modal-box {
+    background: #fff; border-radius: 12px; padding: 28px 32px 24px;
+    width: 340px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  }
+  #modal-box h3 { font-size: 1rem; margin-bottom: 16px; color: #333; }
+  #modal-box p  { font-size: .85rem; color: #777; margin-bottom: 12px; word-break: break-all; }
+  #modal-box input[type="password"] {
+    width: 100%; padding: 10px 12px; border: 1px solid #d0d5dd;
+    border-radius: 8px; font-size: .9rem; outline: none; transition: border .15s;
+  }
+  #modal-box input[type="password"]:focus { border-color: #4f6ef7; }
+  #modal-err { color: #e74c3c; font-size: .8rem; margin-top: 8px; min-height: 1.2em; }
+  #modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+  #modal-actions button {
+    padding: 7px 20px; border-radius: 8px; font-size: .85rem; cursor: pointer; border: none; transition: all .15s;
+  }
+  #modal-cancel { background: #f0f2f5; color: #555; }
+  #modal-cancel:hover { background: #e4e7ee; }
+  #modal-confirm { background: #e74c3c; color: #fff; }
+  #modal-confirm:hover { background: #c0392b; }
 </style>
 </head>
 <body>
@@ -136,6 +172,20 @@
     <button id="refresh-btn" onclick="loadFileList()">刷新</button>
   </div>
   <ul id="file-list"><li class="fempty">加载中...</li></ul>
+</div>
+
+<!-- ── 删除密码弹窗 ── -->
+<div id="modal-overlay">
+  <div id="modal-box">
+    <h3>🔑 删除文件</h3>
+    <p id="modal-filename"></p>
+    <input type="password" id="modal-pwd" placeholder="请输入删除密码" autocomplete="off">
+    <div id="modal-err"></div>
+    <div id="modal-actions">
+      <button id="modal-cancel">取消</button>
+      <button id="modal-confirm">确认删除</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -234,12 +284,70 @@ async function loadFileList() {
       return;
     }
     fileListEl.innerHTML = files.map(f =>
-      `<li><a class="fname" href="/uploads/${encodeURIComponent(f.name)}" title="${fmtName(f.name)}">${fmtName(f.name)}</a><span class="fsize">${fmtSize(f.size)}</span></li>`
+      `<li><a class="fname" href="/uploads/${encodeURIComponent(f.name)}" title="${fmtName(f.name)}">${fmtName(f.name)}</a><span class="fsize">${fmtSize(f.size)}</span><button class="del-btn" onclick="promptDelete('${encodeURIComponent(f.name)}')" title="删除">✕</button></li>`
     ).join("");
   } catch {
     fileListEl.innerHTML = '<li class="fempty">加载失败</li>';
   }
 }
+
+// ── 删除密码弹窗 ──
+const modalOverlay  = document.getElementById("modal-overlay");
+const modalFilename = document.getElementById("modal-filename");
+const modalPwd      = document.getElementById("modal-pwd");
+const modalErr      = document.getElementById("modal-err");
+const modalConfirm  = document.getElementById("modal-confirm");
+const modalCancel   = document.getElementById("modal-cancel");
+
+let _deleteTarget = "";
+
+function promptDelete(encodedName) {
+  _deleteTarget = decodeURIComponent(encodedName);
+  modalFilename.textContent = `确定要删除 "${_deleteTarget}" 吗？`;
+  modalPwd.value = "";
+  modalErr.textContent = "";
+  modalOverlay.classList.add("show");
+  setTimeout(() => modalPwd.focus(), 100);
+}
+
+function closeModal() {
+  modalOverlay.classList.remove("show");
+  _deleteTarget = "";
+}
+
+modalCancel.addEventListener("click", closeModal);
+modalOverlay.addEventListener("click", e => { if (e.target === modalOverlay) closeModal(); });
+modalPwd.addEventListener("keydown", e => { if (e.key === "Enter") modalConfirm.click(); });
+
+modalConfirm.addEventListener("click", async () => {
+  const pwd = modalPwd.value.trim();
+  if (!pwd) { modalErr.textContent = "请输入密码"; return; }
+
+  modalConfirm.disabled = true;
+  modalConfirm.textContent = "删除中...";
+  modalErr.textContent = "";
+
+  try {
+    const res = await fetch(`/api/delete/${encodeURIComponent(_deleteTarget)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pwd }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      closeModal();
+      showMsg(`✓ 已删除 "${_deleteTarget}"`, "ok");
+      loadFileList();
+    } else {
+      modalErr.textContent = data.error || "删除失败";
+    }
+  } catch {
+    modalErr.textContent = "网络错误，请重试";
+  } finally {
+    modalConfirm.disabled = false;
+    modalConfirm.textContent = "确认删除";
+  }
+});
 
 loadFileList();
 </script>

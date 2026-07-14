@@ -7,6 +7,7 @@ app = Flask(__name__)
 # ── 配置 ──────────────────────────────────────────────
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 MAX_FILE_SIZE = 200 * 1024 * 1024  # 单文件上限 200 MB
+DELETE_PASSWORD = os.environ.get("DELETE_PASSWORD", "173173")  # 删除密码，可通过环境变量修改
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE * 5
@@ -112,8 +113,25 @@ def upload():
 
 @app.route("/uploads/<path:filename>")
 def download(filename):
-    # send_from_directory 已内置路径穿越保护
-    return send_from_directory(UPLOAD_DIR, filename)
+    from urllib.parse import quote
+    import os as _os
+    filepath = _os.path.normpath(_os.path.join(UPLOAD_DIR, filename))
+    if not filepath.startswith(UPLOAD_DIR):
+        return "Forbidden", 403
+    if not _os.path.isfile(filepath):
+        return "Not Found", 404
+
+    safe_name = quote(filename, safe="")
+
+    with open(filepath, "rb") as f:
+        data = f.read()
+
+    headers = {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": str(len(data)),
+        "Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}",
+    }
+    return data, 200, headers
 
 
 @app.route("/api/files")
@@ -130,6 +148,26 @@ def list_files():
                 "mtime": int(stat.st_mtime),
             })
     return jsonify(files)
+
+
+@app.route("/api/delete/<path:filename>", methods=["POST"])
+def delete_file(filename):
+    """带密码验证的删除接口"""
+    # 验证密码
+    body = request.get_json(silent=True) or {}
+    if body.get("password") != DELETE_PASSWORD:
+        return jsonify(error="密码错误"), 403
+
+    # 路径安全检查
+    import os as _os
+    filepath = _os.path.normpath(_os.path.join(UPLOAD_DIR, filename))
+    if not filepath.startswith(UPLOAD_DIR):
+        return jsonify(error="禁止访问"), 403
+    if not _os.path.isfile(filepath):
+        return jsonify(error="文件不存在"), 404
+
+    _os.remove(filepath)
+    return jsonify(success=True, filename=filename)
 
 
 # ── 启动 ──────────────────────────────────────────────
